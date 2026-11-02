@@ -1,0 +1,50 @@
+# Builds the solution and runs every test on each pull request and on pushes to main.
+# The tests are offline and deterministic (in-memory host, mock providers, fake clocks), so no secrets or
+# services are needed. The longer mutation check (tools/mutation_check.py, about 15 minutes) is not run here.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Actions are pinned to full commit SHAs (version in the comment); Dependabot (.github/dependabot.yml) proposes updates.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # global.json pins 10.0.100 with latestFeature roll-forward, so any .NET 10 SDK satisfies it.
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore AiCore.slnx
+
+      - name: Build
+        run: dotnet build AiCore.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: >
+          dotnet test AiCore.slnx --no-build --configuration Release
+          --logger "console;verbosity=normal"
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-results
+          path: TestResults/*.trx
+          if-no-files-found: warn
